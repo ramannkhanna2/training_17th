@@ -1,0 +1,77 @@
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+ 
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v2
+ 
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+ 
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+ 
+      - name: Run tests
+        run: |
+          pytest tests/
+ 
+      - name: Report Test Results to GitHub Status API
+        if: success()
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -d '{"state": "success", "description": "Tests passed successfully."}' \
+            https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}
+ 
+      - name: Report Test Failure to GitHub Status API
+        if: failure()
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -d '{"state": "failure", "description": "Tests failed."}' \
+            https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}
+ 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v2
+ 
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: 'us-west-2'
+ 
+      - name: Deploy to AWS EC2
+        run: |
+          scp -i ${{ secrets.EC2_SSH_PRIVATE_KEY }} ./myapp.zip ubuntu@${{ secrets.EC2_PUBLIC_IP }}:/home/ubuntu/
+          ssh -i ${{ secrets.EC2_SSH_PRIVATE_KEY }} ubuntu@${{ secrets.EC2_PUBLIC_IP }} 'unzip /home/ubuntu/myapp.zip -d /var/www/myapp'
+ 
+      - name: Report Deployment Status to GitHub
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -d '{"state": "success", "description": "Deployment to AWS successful."}' \
+            https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}
+ 
+      - name: Notify on Slack (Deployment Success)
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data '{"text": "Deployment Successful! The tests passed and the app has been deployed to AWS EC2 successfully."}' \
+          https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+ 
+ 
